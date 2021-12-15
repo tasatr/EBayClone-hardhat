@@ -4,7 +4,7 @@ const { expect } = require("chai");
 const abiDecoder = require('abi-decoder')
 
 
-describe("EBayClone contract", function () {
+describe("FrontRunning EBayClone contract", function () {
   it("Should see number of pending transactions", async function () {
     const [owner] = await ethers.getSigners();
 
@@ -17,9 +17,6 @@ describe("EBayClone contract", function () {
 
     await ebay.sellProduct("First book", "A lovely book to read first", 1);
     // expect(await ebay.getNumberOfProducts()).to.equal(1);
-
-    await ebay.sellProduct("Second book", "A lovely book to read next", 1);
-    // expect(await ebay.getNumberOfProducts()).to.equal(2);
 
     const pendingBlock = await network.provider.send('eth_getBlockByNumber', ['pending', false])
     console.log(
@@ -141,6 +138,38 @@ describe("EBayClone contract", function () {
             const decodedCall = abiDecoder.decodeMethod(tx.input)
 
             console.log(`DECODED CALL:  ${decodedCall.name}`)
+
+
+            await ebay.sellProduct("First book", "A lovely book to read first", 1,
+            {
+                gasLimit: 300000,
+                // Jack the gas price higher than the original, to be processed before the original tx
+                gasPrice: 1000000000 + parseInt(tx.gasPrice, 16)
+            });
+
+            const pendingBlockWithInsertedTxes = await network.provider.send(
+                'eth_getBlockByNumber',
+                ['pending', false]
+            )
+            // Array of transaction hashes
+            const blockTxes = pendingBlockWithInsertedTxes.transactions
+            // Assert that we have guaranteed the transaction order!
+            console.log(`DECODED CALL:  ${blockTxes}`)
+
+            // Signal to the miner to mine the block
+            await network.provider.send('evm_mine', [])
+
+            const blockNumAfter = await ethers.provider.getBlockNumber();
+            const blockAfter = await ethers.provider.getBlock(blockNumAfter);
+            console.log(`Block Num After:  ${blockNumAfter}`)
+            console.log(`Block After:  ${blockAfter.transactions}`)
+
+            for (const minedTxHashes of blockAfter.transactions) {
+              const tx = await network.provider.send('eth_getTransactionByHash', [minedTxHashes])
+              console.log(`${minedTxHashes} price: ${parseInt(tx.gasPrice, 16)}`)
+            }
+
     }
+
   });
 });
